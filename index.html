@@ -1,7 +1,57 @@
 <!DOCTYPE html>
 <html>
-  <body>
-    <h1>Can you read this? Say 17</h1>
-    <p>If you can read this, the site is live.</p>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My App</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f5f7; }
+    header { background: #fff; padding: 16px; border-bottom: 1px solid #ddd; }
+    h1 { margin: 0; font-size: 20px; }
+    nav { display: flex; background: #fff; border-bottom: 1px solid #ddd; }
+    nav button {
+      flex: 1; padding: 14px; border: none; background: none;
+      font-size: 15px; cursor: pointer; color: #666;
+      border-bottom: 3px solid transparent;
+    }
+    nav button.active { color: #000; font-weight: 600; border-bottom-color: #000; }
+    .panel { display: none; padding: 20px; }
+    .panel.active { display: block; }
+  </style>
+</head>
+<body>
+
+  <header><h1>My App</h1></header>
+
+  <nav>
+    <button class="active" onclick="show('home', this)">Home</button>
+    <button onclick="show('about', this)">About</button>
+    <button onclick="show('more', this)">More</button>
+  </nav>
+
+  <div id="home" class="panel active">
+    <h2>Home</h2>
+    <p>This is the first tab.</p>
+  </div>
+
+  <div id="about" class="panel">
+    <h2>About</h2>
+    <p>This is the second tab.</p>
+  </div>
+
+  <div id="more" class="panel">
+    <h2>More</h2>
+    <p>This is the third tab.</p>
+  </div>
+
+  <script>
+    function show(id, btn) {
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+      btn.classList.add('active');
+    }
+  </script>
+
+</body>
 </html>
