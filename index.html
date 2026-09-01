@@ -22,8 +22,32 @@
     li { background: #fff; padding: 14px; margin-bottom: 8px; border-radius: 8px;
          display: flex; justify-content: space-between; align-items: center; }
     .x { background: none; border: none; color: #999; font-size: 20px; cursor: pointer; }
-    canvas { background: #fff; border-radius: 8px; width: 100%; max-width: 480px; display: block; }
-    .hint { color: #666; font-size: 14px; }
+
+    /* --- game --- */
+    #game { max-width: 640px; }
+    .fighters { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .unit { background: #fff; border-radius: 10px; padding: 14px; flex: 1; }
+    .unit h3 { margin: 0 0 8px; font-size: 16px; }
+    .bar { background: #eee; border-radius: 5px; height: 10px; overflow: hidden; margin-bottom: 6px; }
+    .bar span { display: block; height: 100%; background: #d33; }
+    .stat { font-size: 13px; color: #555; }
+    .intent { margin-top: 8px; font-size: 13px; font-weight: 600; color: #b00; }
+    .block { color: #06c; font-weight: 600; }
+    .log { background: #fff; border-radius: 8px; padding: 10px 12px; font-size: 13px;
+           color: #555; margin-bottom: 12px; min-height: 18px; }
+    .hand { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .card { background: #fff; border: 2px solid #ddd; border-radius: 10px; padding: 10px;
+            width: 96px; cursor: pointer; text-align: center; }
+    .card:hover { border-color: #000; }
+    .card.dead { opacity: .4; cursor: not-allowed; }
+    .card b { display: block; font-size: 13px; margin-bottom: 4px; }
+    .card small { color: #666; font-size: 11px; }
+    .cost { background: #000; color: #fff; border-radius: 50%; width: 20px; height: 20px;
+            line-height: 20px; font-size: 12px; margin: 0 auto 6px; }
+    .bigbtn { padding: 12px 20px; font-size: 15px; border: none; border-radius: 8px;
+              background: #000; color: #fff; cursor: pointer; }
+    .piles { font-size: 12px; color: #888; margin-top: 10px; }
+    .loot { background: #fff; border-radius: 10px; padding: 16px; }
   </style>
 </head>
 <body>
@@ -49,10 +73,7 @@
     <ul id="items"></ul>
   </div>
 
-  <div id="game" class="panel">
-    <canvas id="cv" width="480" height="320"></canvas>
-    <p class="hint">Click the canvas, then use WASD to move.</p>
-  </div>
+  <div id="game" class="panel"></div>
 
   <script>
     // ---- tabs ----
@@ -81,71 +102,217 @@
     }
     draw();
 
-    // ---- game ----
-    const cv = document.getElementById('cv');
-    const ctx = cv.getContext('2d');
-    const player = { x: 220, y: 140, speed: 2.5, facing: 1 };
-    const keys = {};
-    let step = 0;
+    // ================= CARD GAME =================
 
-    document.addEventListener('keydown', e => {
-      if (document.activeElement.tagName === 'INPUT') return;
-      keys[e.key.toLowerCase()] = true;
-    });
-    document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+    // every card in the game lives here
+    const CARDS = {
+      strike:  { name: 'Strike',    cost: 1, text: 'Deal 6',            play: () => hit(6) },
+      defend:  { name: 'Defend',    cost: 1, text: 'Gain 5 block',      play: () => { me.block += 5; } },
+      bash:    { name: 'Bash',      cost: 2, text: 'Deal 12',           play: () => hit(12) },
+      jab:     { name: 'Quick Jab', cost: 0, text: 'Deal 3',            play: () => hit(3) },
+      wall:    { name: 'Iron Wall', cost: 2, text: 'Gain 12 block',     play: () => { me.block += 12; } },
+      drain:   { name: 'Drain',     cost: 1, text: 'Deal 4, heal 3',    play: () => { hit(4); me.hp = Math.min(me.maxHp, me.hp + 3); } },
+      flurry:  { name: 'Flurry',    cost: 1, text: 'Deal 5, draw 1',    play: () => { hit(5); drawCards(1); } },
+      brace:   { name: 'Brace',     cost: 0, text: 'Gain 3 block',      play: () => { me.block += 3; } },
+    };
 
-    function drawGuy(x, y, swing, facing) {
-      ctx.strokeStyle = '#000';
-      ctx.fillStyle = '#000';
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
+    // cards that can show up as loot
+    const LOOT_POOL = ['bash', 'jab', 'wall', 'drain', 'flurry', 'brace', 'strike', 'defend'];
 
-      ctx.beginPath();
-      ctx.arc(x, y - 26, 7, 0, Math.PI * 2);
-      ctx.fill();
+    let me, foe, deck, hand, discard, energy, floor, log, phase, lootChoices;
 
-      ctx.beginPath();
-      ctx.moveTo(x, y - 19);
-      ctx.lineTo(x, y - 6);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(x - 9, y - 10 + swing * 4);
-      ctx.lineTo(x, y - 16);
-      ctx.lineTo(x + 9, y - 10 - swing * 4);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(x - 7, y + 8 - Math.abs(swing) * 2);
-      ctx.lineTo(x, y - 6);
-      ctx.lineTo(x + 7, y + 8 - Math.abs(swing) * 2);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(x + facing * 4, y - 27, 1.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#fff';
-      ctx.fill();
+    function newRun() {
+      me = { hp: 40, maxHp: 40, block: 0 };
+      deck = ['strike','strike','strike','strike','defend','defend','defend','defend','bash'];
+      floor = 0;
+      nextFight();
     }
 
-    function loop() {
-      let moving = false;
-
-      if (keys['w']) { player.y -= player.speed; moving = true; }
-      if (keys['s']) { player.y += player.speed; moving = true; }
-      if (keys['a']) { player.x -= player.speed; moving = true; player.facing = -1; }
-      if (keys['d']) { player.x += player.speed; moving = true; player.facing =  1; }
-
-      player.x = Math.max(12, Math.min(cv.width  - 12, player.x));
-      player.y = Math.max(30, Math.min(cv.height - 12, player.y));
-
-      if (moving) step += 0.2; else step = 0;
-
-      ctx.clearRect(0, 0, cv.width, cv.height);
-      drawGuy(player.x, player.y, Math.sin(step), player.facing);
-
-      requestAnimationFrame(loop);
+    function nextFight() {
+      floor++;
+      foe = {
+        name: 'Enemy ' + floor,
+        hp: 10 + floor * 5,
+        maxHp: 10 + floor * 5,
+        block: 0,
+        intent: null
+      };
+      discard = [];
+      hand = [];
+      shuffleDeck();
+      pickIntent();
+      log = 'Floor ' + floor + '. A fight begins.';
+      phase = 'fight';
+      startTurn();
     }
-    loop();
+
+    function shuffleDeck() {
+      // Fisher-Yates: walk backwards, swap each card with a random earlier one
+      for (let i = deck.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [deck[i], deck[j]] = [deck[j], deck[i]];
+      }
+    }
+
+    function drawCards(n) {
+      for (let i = 0; i < n; i++) {
+        if (deck.length === 0) {
+          if (discard.length === 0) return;   // nothing left anywhere
+          deck = discard;
+          discard = [];
+          shuffleDeck();
+        }
+        hand.push(deck.pop());
+      }
+    }
+
+    function startTurn() {
+      me.block = 0;          // block only lasts one enemy turn
+      energy = 3;
+      drawCards(5);
+      render();
+    }
+
+    function hit(dmg) {
+      const through = Math.max(0, dmg - foe.block);
+      foe.block = Math.max(0, foe.block - dmg);
+      foe.hp -= through;
+    }
+
+    function playCard(i) {
+      const card = CARDS[hand[i]];
+      if (card.cost > energy) return;
+
+      energy -= card.cost;
+      hand.splice(i, 1);          // take it out of hand BEFORE it runs
+      discard.push(card === CARDS.strike ? 'strike' : keyOf(card));
+      card.play();
+
+      if (foe.hp <= 0) { winFight(); return; }
+      render();
+    }
+
+    function keyOf(card) {
+      return Object.keys(CARDS).find(k => CARDS[k] === card);
+    }
+
+    function pickIntent() {
+      // 70% attack, 30% defend
+      if (Math.random() < 0.7) {
+        foe.intent = { type: 'attack', value: 4 + floor * 2 };
+      } else {
+        foe.intent = { type: 'block', value: 5 + floor };
+      }
+    }
+
+    function endTurn() {
+      discard = discard.concat(hand);
+      hand = [];
+
+      foe.block = 0;
+      if (foe.intent.type === 'attack') {
+        const dmg = foe.intent.value;
+        const through = Math.max(0, dmg - me.block);
+        me.block = Math.max(0, me.block - dmg);
+        me.hp -= through;
+        log = foe.name + ' attacks for ' + dmg + (through < dmg ? ' (blocked some)' : '') + '.';
+      } else {
+        foe.block += foe.intent.value;
+        log = foe.name + ' braces for ' + foe.intent.value + '.';
+      }
+
+      if (me.hp <= 0) { phase = 'dead'; render(); return; }
+
+      pickIntent();
+      startTurn();
+    }
+
+    function winFight() {
+      phase = 'loot';
+      lootChoices = [];
+      while (lootChoices.length < 3) {
+        const pick = LOOT_POOL[Math.floor(Math.random() * LOOT_POOL.length)];
+        if (!lootChoices.includes(pick)) lootChoices.push(pick);
+      }
+      render();
+    }
+
+    function takeLoot(key) {
+      deck.push(key);
+      me.hp = Math.min(me.maxHp, me.hp + 5);   // small heal between fights
+      nextFight();
+    }
+
+    function skipLoot() { nextFight(); }
+
+    function render() {
+      const g = document.getElementById('game');
+
+      if (phase === 'dead') {
+        g.innerHTML = `
+          <div class="loot">
+            <h2>You died on floor ${floor}</h2>
+            <p>Your deck had ${deck.length + discard.length + hand.length} cards.</p>
+            <button class="bigbtn" onclick="newRun()">New run</button>
+          </div>`;
+        return;
+      }
+
+      if (phase === 'loot') {
+        g.innerHTML = `
+          <div class="loot">
+            <h2>Victory — floor ${floor}</h2>
+            <p>Add a card to your deck:</p>
+            <div class="hand">
+              ${lootChoices.map(k => `
+                <div class="card" onclick="takeLoot('${k}')">
+                  <div class="cost">${CARDS[k].cost}</div>
+                  <b>${CARDS[k].name}</b>
+                  <small>${CARDS[k].text}</small>
+                </div>`).join('')}
+            </div>
+            <button class="bigbtn" onclick="skipLoot()">Skip</button>
+          </div>`;
+        return;
+      }
+
+      g.innerHTML = `
+        <div class="fighters">
+          <div class="unit">
+            <h3>You</h3>
+            <div class="bar"><span style="width:${me.hp / me.maxHp * 100}%"></span></div>
+            <div class="stat">${me.hp} / ${me.maxHp} HP
+              ${me.block ? `&nbsp;<span class="block">${me.block} block</span>` : ''}</div>
+            <div class="stat">Energy: ${energy} / 3</div>
+          </div>
+          <div class="unit">
+            <h3>${foe.name}</h3>
+            <div class="bar"><span style="width:${Math.max(0, foe.hp) / foe.maxHp * 100}%"></span></div>
+            <div class="stat">${Math.max(0, foe.hp)} / ${foe.maxHp} HP
+              ${foe.block ? `&nbsp;<span class="block">${foe.block} block</span>` : ''}</div>
+            <div class="intent">${foe.intent.type === 'attack'
+              ? 'Will attack for ' + foe.intent.value
+              : 'Will block ' + foe.intent.value}</div>
+          </div>
+        </div>
+
+        <div class="log">${log}</div>
+
+        <div class="hand">
+          ${hand.map((k, i) => `
+            <div class="card ${CARDS[k].cost > energy ? 'dead' : ''}" onclick="playCard(${i})">
+              <div class="cost">${CARDS[k].cost}</div>
+              <b>${CARDS[k].name}</b>
+              <small>${CARDS[k].text}</small>
+            </div>`).join('')}
+        </div>
+
+        <button class="bigbtn" onclick="endTurn()">End turn</button>
+        <div class="piles">Draw pile: ${deck.length} &nbsp;·&nbsp; Discard: ${discard.length} &nbsp;·&nbsp; Deck size: ${deck.length + discard.length + hand.length}</div>
+      `;
+    }
+
+    newRun();
   </script>
 
 </body>
